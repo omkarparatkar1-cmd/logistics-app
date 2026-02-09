@@ -7,7 +7,7 @@ logging.basicConfig(level=logging.INFO)
 INPUT_FOLDER_ID = "1tjO0DM0XOEnBwcfWyJiaNINUb5tbl7Ed"
 
 def main():
-    logging.info("Starting   Drive processing job")
+    logging.info("Starting feb 9 2.35  Drive processing job")
 
     creds, _ = default()
     service = build("drive", "v3", credentials=creds)
@@ -29,4 +29,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

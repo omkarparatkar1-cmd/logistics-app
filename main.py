@@ -18,9 +18,9 @@ import spacy
 # CONFIGURATION at 10.22
 # ======================
 
-INPUT_FOLDER_ID = "1tjO0DM0XOEnBwcfWyJiaNINUb5tbl7Ed"
-ARCHIVE_FOLDER_ID = "1ic5paKlxZZRy4zAtMcjBMU9TRoilom6s"
-OUTPUT_FOLDER_ID = "1KpoGkgxWIWXNva0o7tkxvFhRQyrPHoSq"
+INPUT_FOLDER_ID = "1izhUDzMYVGh4x01svM_fnalNFpHERTLg"
+ARCHIVE_FOLDER_ID = "12YASYdyd4MBtQqZ5hRoDcUHwjeT80Kgh"
+OUTPUT_FOLDER_ID = "16bO80ar8sPtPJNujQa6vCzGwjq7ZpR0Y"
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 nlp = spacy.load("en_core_web_sm")
@@ -203,5 +203,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 

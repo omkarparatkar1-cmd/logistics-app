@@ -116,33 +116,41 @@ def get_or_create_daily_sheet():
     sheet_name = f"Parsed_Labels_{date.today().isoformat()}"
     logging.info(f"Using sheet: {sheet_name}")
 
-    q = f"name='{sheet_name}' and '{OUTPUT_FOLDER_ID}' in parents and trashed=false"
+    # 1. Check if sheet already exists in Outputs folder
+    query = (
+        f"name='{sheet_name}' and "
+        f"'{OUTPUT_FOLDER_ID}' in parents and "
+        f"mimeType='application/vnd.google-apps.spreadsheet' and "
+        f"trashed=false"
+    )
+
     res = drive.files().list(
-        q=q,
-        supportsAllDrives=True,
-        includeItemsFromAllDrives=True,
-        fields="files(id)"
+        q=query,
+        fields="files(id, name)",
+        supportsAllDrives=True
     ).execute()
 
-    if res["files"]:
-        return res["files"][0]["id"]
+    if res.get("files"):
+        sheet_id = res["files"][0]["id"]
+        logging.info("Found existing Google Sheet")
+        return sheet_id
 
-    sheet = sheets.spreadsheets().create(
-        body={"properties": {"title": sheet_name}},
-        fields="spreadsheetId"
+    # 2. Create the spreadsheet DIRECTLY in the Outputs folder
+    file_metadata = {
+        "name": sheet_name,
+        "mimeType": "application/vnd.google-apps.spreadsheet",
+        "parents": [OUTPUT_FOLDER_ID],
+    }
+
+    sheet = drive.files().create(
+        body=file_metadata,
+        fields="id",
+        supportsAllDrives=True
     ).execute()
 
-    sheet_id = sheet["spreadsheetId"]
+    sheet_id = sheet["id"]
+    logging.info("Created new Google Sheet via Drive API")
 
-    drive.files().update(
-        fileId=sheet_id,
-        addParents=OUTPUT_FOLDER_ID,
-        removeParents="root",
-        supportsAllDrives=True,
-        fields="id"
-    ).execute()
-
-    logging.info("Created new Google Sheet")
     return sheet_id
 
 def append_rows(sheet_id, rows):
@@ -203,6 +211,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

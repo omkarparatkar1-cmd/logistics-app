@@ -1,2 +1,10 @@
-﻿google-api-python-client
+google-api-python-client
 google-auth
+google-auth-httplib2
+google-auth-oauthlib
+
+pytesseract
+pillow
+numpy
+opencv-python-headless
+spacy

@@ -15,7 +15,7 @@ from PIL import Image
 import spacy
 
 # ======================
-# CONFIGURATION
+# CONFIGURATION at 10.22
 # ======================
 
 INPUT_FOLDER_ID = "1tjO0DM0XOEnBwcfWyJiaNINUb5tbl7Ed"
@@ -203,4 +203,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

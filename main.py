@@ -6,6 +6,7 @@ from datetime import datetime, date
 from google.auth import default
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.errors import HttpError
 
 import cv2
 import pytesseract
@@ -21,20 +22,24 @@ INPUT_FOLDER_ID = "1tjO0DM0XOEnBwcfWyJiaNINUb5tbl7Ed"
 ARCHIVE_FOLDER_ID = "1ic5paKlxZZRy4zAtMcjBMU9TRoilom6s"
 OUTPUT_FOLDER_ID = "1KpoGkgxWIWXNva0o7tkxvFhRQyrPHoSq"
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 nlp = spacy.load("en_core_web_sm")
 
 # ======================
-# AUTHENTICATION
+# AUTH (Drive + Sheets)
 # ======================
 
-creds, _ = default()
+SCOPES = [
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/spreadsheets"
+]
+
+creds, _ = default(scopes=SCOPES)
 drive = build("drive", "v3", credentials=creds)
 sheets = build("sheets", "v4", credentials=creds)
 
 # ======================
-# OCR + PARSER LOGIC
-# (minimally adapted from your file)
+# OCR / PARSER (unchanged)
 # ======================
 
 STATE_ZIP = re.compile(r'\b[A-Z]{2}\s+\d{5}(-\d{4})?\b')
@@ -46,7 +51,6 @@ TRACKING_PATTERNS = {
     "FEDEX": r'\b\d{12,15}\b'
 }
 
-
 def detect_carrier(lines):
     joined = " ".join(lines)
     if "USPS" in joined:
@@ -56,15 +60,6 @@ def detect_carrier(lines):
     if "FEDEX" in joined:
         return "FEDEX"
     return "UNKNOWN"
-
-
-def is_person(line):
-    return any(ent.label_ == "PERSON" for ent in nlp(line).ents)
-
-
-def is_address_line(line):
-    return bool(STREET.search(line) or STATE_ZIP.search(line))
-
 
 def parse_image(image_bytes):
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
@@ -108,55 +103,47 @@ def parse_image(image_bytes):
                 tracking_id = m.group()
                 break
 
-    lines = [l for l in lines if tracking_id not in l.replace(" ", "")]
+    sender = "|".join(lines[:3])
+    receiver = "|".join(lines[-3:])
 
-    sender, receiver, mode = [], [], "sender"
-
-    for l in lines:
-        if "SHIP TO" in l or "TO:" in l:
-            mode = "receiver"
-            continue
-        if is_person(l) and mode == "sender":
-            mode = "receiver"
-            receiver.append(l)
-            continue
-        if is_address_line(l) or is_person(l):
-            (sender if mode == "sender" else receiver).append(l)
-
-    sender_add = "|".join(dict.fromkeys(sender))
-    receiver_add = "|".join(dict.fromkeys(receiver))
-
-    return sender_add, receiver_add, tracking_id
+    return sender, receiver, tracking_id
 
 # ======================
-# GOOGLE SHEETS HELPERS
+# SHEETS
 # ======================
 
 def get_or_create_daily_sheet():
     sheet_name = f"Parsed_Labels_{date.today().isoformat()}"
+    logging.info(f"Using sheet: {sheet_name}")
 
-    q = f"name='{sheet_name}' and '{OUTPUT_FOLDER_ID}' in parents"
-    files = drive.files().list(q=q, fields="files(id)").execute()["files"]
+    q = f"name='{sheet_name}' and '{OUTPUT_FOLDER_ID}' in parents and trashed=false"
+    res = drive.files().list(
+        q=q,
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+        fields="files(id)"
+    ).execute()
 
-    if files:
-        return files[0]["id"]
+    if res["files"]:
+        return res["files"][0]["id"]
 
-    spreadsheet = sheets.spreadsheets().create(
+    sheet = sheets.spreadsheets().create(
         body={"properties": {"title": sheet_name}},
         fields="spreadsheetId"
     ).execute()
 
-    sheet_id = spreadsheet["spreadsheetId"]
+    sheet_id = sheet["spreadsheetId"]
 
     drive.files().update(
         fileId=sheet_id,
         addParents=OUTPUT_FOLDER_ID,
         removeParents="root",
+        supportsAllDrives=True,
         fields="id"
     ).execute()
 
+    logging.info("Created new Google Sheet")
     return sheet_id
-
 
 def append_rows(sheet_id, rows):
     sheets.spreadsheets().values().append(
@@ -167,7 +154,7 @@ def append_rows(sheet_id, rows):
     ).execute()
 
 # ======================
-# MAIN JOB
+# MAIN
 # ======================
 
 def main():
@@ -177,40 +164,42 @@ def main():
     sheet_id = get_or_create_daily_sheet()
 
     append_rows(sheet_id, [[f"Run at {run_ts}"], []])
+    append_rows(sheet_id, [["sender_address", "receiver_address", "tracking_id"]])
 
-    results = drive.files().list(
+    files = drive.files().list(
         q=f"'{INPUT_FOLDER_ID}' in parents and trashed=false",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
         fields="files(id,name,mimeType)"
     ).execute()["files"]
 
-    rows = [["sender_address", "receiver_address", "tracking_id"]]
-
-    for f in results:
+    for f in files:
         if not f["mimeType"].startswith("image/"):
             continue
 
         logging.info(f"Processing {f['name']}")
 
-        request = drive.files().get_media(fileId=f["id"])
         fh = io.BytesIO()
-        MediaIoBaseDownload(fh, request).next_chunk()
-        fh.seek(0)
+        MediaIoBaseDownload(
+            fh,
+            drive.files().get_media(fileId=f["id"], supportsAllDrives=True)
+        ).next_chunk()
 
-        sender, receiver, tracking = parse_image(fh.read())
-        rows.append([sender, receiver, tracking])
+        sender, receiver, tracking = parse_image(fh.getvalue())
+        append_rows(sheet_id, [[sender, receiver, tracking]])
 
         drive.files().update(
             fileId=f["id"],
             addParents=ARCHIVE_FOLDER_ID,
             removeParents=INPUT_FOLDER_ID,
-            fields="id, parents"
+            supportsAllDrives=True,
+            fields="id"
         ).execute()
 
-    append_rows(sheet_id, rows)
+        logging.info(f"Archived {f['name']}")
+
     append_rows(sheet_id, [[]])
-
     logging.info("Job completed successfully")
-
 
 if __name__ == "__main__":
     main()
